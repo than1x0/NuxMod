@@ -7,7 +7,6 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
-	"syscall"
 	"time"
 )
 
@@ -115,7 +114,7 @@ func StartBackgroundDaemon() error {
 	}
 
 	cmd := exec.Command(selfPath, "__daemon")
-	cmd.SysProcAttr = &syscall.SysProcAttr{Setsid: true} // Detach from terminal
+	cmd.SysProcAttr = getDaemonSysProcAttr() // Detach from terminal on Linux
 	if logFile != nil {
 		cmd.Stdout = logFile
 		cmd.Stderr = logFile

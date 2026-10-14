@@ -8,9 +8,7 @@ import (
 	"os/exec"
 	"strconv"
 	"strings"
-	"syscall"
 	"time"
-	"unsafe"
 
 	"github.com/Sathira-Laksahan/vless-linux/internal/daemon"
 	"github.com/Sathira-Laksahan/vless-linux/internal/profile"
@@ -89,17 +87,16 @@ func getTerminalSize() (width, height int) {
 
 	// 1. Try /dev/tty first (the real controlling terminal)
 	if f, err := os.OpenFile("/dev/tty", os.O_RDWR, 0); err == nil {
-		ret, _, _ := syscall.Syscall(syscall.SYS_IOCTL, f.Fd(), uintptr(0x5413), uintptr(unsafe.Pointer(ws)))
+		ok := getTermSizeIoctl(f.Fd(), ws)
 		f.Close()
-		if int(ret) == 0 && ws.Col > 0 && ws.Row > 0 {
+		if ok {
 			return int(ws.Col), int(ws.Row)
 		}
 	}
 
 	// 2. Try stdout, stdin, stderr
 	for _, fd := range []uintptr{os.Stdout.Fd(), os.Stdin.Fd(), os.Stderr.Fd()} {
-		ret, _, _ := syscall.Syscall(syscall.SYS_IOCTL, fd, uintptr(0x5413), uintptr(unsafe.Pointer(ws)))
-		if int(ret) == 0 && ws.Col > 0 && ws.Row > 0 {
+		if getTermSizeIoctl(fd, ws) {
 			return int(ws.Col), int(ws.Row)
 		}
 	}
