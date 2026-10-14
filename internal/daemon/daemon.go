@@ -80,19 +80,47 @@ func (d *Daemon) addLog(line string) {
 	d.logMu.Lock()
 	defer d.logMu.Unlock()
 
-	// Keep only formatted time and clean message
-	parts := strings.SplitN(line, " ", 3)
-	cleanLine := line
-	if len(parts) >= 3 && strings.Contains(line, "INFO") || strings.Contains(line, "ERROR") || strings.Contains(line, "WARN") {
-		cleanLine = fmt.Sprintf("[%s] %s", time.Now().Format("15:04:05"), parts[len(parts)-1])
-	} else {
-		cleanLine = fmt.Sprintf("[%s] %s", time.Now().Format("15:04:05"), line)
+	// Strip raw ANSI escape sequences from sing-box
+	clean := stripAnsi(line)
+	clean = strings.TrimSpace(clean)
+	if clean == "" {
+		return
 	}
+
+	// Filter and format message
+	if idx := strings.Index(clean, "INFO "); idx != -1 {
+		clean = strings.TrimSpace(clean[idx+5:])
+	} else if idx := strings.Index(clean, "WARN "); idx != -1 {
+		clean = strings.TrimSpace(clean[idx+5:])
+	} else if idx := strings.Index(clean, "ERROR "); idx != -1 {
+		clean = strings.TrimSpace(clean[idx+6:])
+	}
+
+	cleanLine := fmt.Sprintf("[%s] %s", time.Now().Format("15:04:05"), clean)
 
 	if len(d.logBuffer) >= MaxLogLines {
 		d.logBuffer = d.logBuffer[1:]
 	}
 	d.logBuffer = append(d.logBuffer, cleanLine)
+}
+
+func stripAnsi(str string) string {
+	var sb strings.Builder
+	inEsc := false
+	for _, r := range str {
+		if r == '\033' {
+			inEsc = true
+			continue
+		}
+		if inEsc {
+			if (r >= 'a' && r <= 'z') || (r >= 'A' && r <= 'Z') {
+				inEsc = false
+			}
+			continue
+		}
+		sb.WriteRune(r)
+	}
+	return sb.String()
 }
 
 func (d *Daemon) getRecentLogs(count int) []string {

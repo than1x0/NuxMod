@@ -12,26 +12,30 @@ import (
 )
 
 const (
-	DefaultSocketPath = "/var/run/vless-linux.sock"
+	DefaultSocketPath = "/var/run/nuxmod.sock"
+	LegacySocketPath  = "/var/run/vless-linux.sock"
 	FallbackSocketDir = "/tmp"
-	DefaultPIDPath    = "/var/run/vless-linux.pid"
+	DefaultPIDPath    = "/var/run/nuxmod.pid"
 )
 
 func GetSocketPath() string {
 	if _, err := os.Stat(DefaultSocketPath); err == nil {
 		return DefaultSocketPath
 	}
+	if _, err := os.Stat(LegacySocketPath); err == nil {
+		return LegacySocketPath
+	}
 	if os.Geteuid() == 0 {
 		return DefaultSocketPath
 	}
-	return filepath.Join(FallbackSocketDir, fmt.Sprintf("vless-linux-%d.sock", os.Getuid()))
+	return filepath.Join(FallbackSocketDir, fmt.Sprintf("nuxmod-%d.sock", os.Getuid()))
 }
 
 func GetPIDPath() string {
 	if os.Geteuid() == 0 {
 		return DefaultPIDPath
 	}
-	return filepath.Join(FallbackSocketDir, fmt.Sprintf("vless-linux-%d.pid", os.Getuid()))
+	return filepath.Join(FallbackSocketDir, fmt.Sprintf("nuxmod-%d.pid", os.Getuid()))
 }
 
 // IPCRequest represents a request sent from CLI/TUI to the Daemon.
@@ -101,13 +105,13 @@ func StartBackgroundDaemon() error {
 	}
 	selfPath, err := os.Executable()
 	if err != nil {
-		selfPath = "/usr/local/bin/vless-linux"
+		selfPath = "/usr/local/bin/nuxmod"
 	}
 
-	logPath := "/var/log/vless-linux.log"
+	logPath := "/var/log/nuxmod.log"
 	logFile, err := os.OpenFile(logPath, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0644)
 	if err != nil {
-		logFile, _ = os.OpenFile("/tmp/vless-linux.log", os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0644)
+		logFile, _ = os.OpenFile("/tmp/nuxmod.log", os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0644)
 	}
 
 	cmd := exec.Command(selfPath, "__daemon")
@@ -128,7 +132,7 @@ func StartBackgroundDaemon() error {
 			return nil
 		}
 	}
-	return fmt.Errorf("daemon process started but IPC socket is not ready yet (check /var/log/vless-linux.log)")
+	return fmt.Errorf("daemon process started but IPC socket is not ready yet (check /var/log/nuxmod.log)")
 }
 
 // StopBackgroundDaemon disconnects the running daemon cleanly.
@@ -138,7 +142,7 @@ func StopBackgroundDaemon() error {
 	}
 	_, err := SendIPCCommand(IPCRequest{Command: "DISCONNECT"}, 3*time.Second)
 	if err != nil {
-		_ = exec.Command("killall", "-9", "sing-box", "vless-linux").Run()
+		_ = exec.Command("killall", "-9", "sing-box", "nuxmod", "vless-linux").Run()
 	}
 	time.Sleep(500 * time.Millisecond)
 	return nil

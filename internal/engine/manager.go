@@ -52,9 +52,11 @@ func (m *EngineManager) EnsureBinary(targetDir string) (string, error) {
 		filepath.Join(targetDir, binName),
 		filepath.Join("/usr/local/bin", binName),
 		filepath.Join("/usr/bin", binName),
+		filepath.Join("/root/.nuxmod/bin", binName),
 		filepath.Join("/root/.vless-linux/bin", binName),
 	}
 	if home, err := os.UserHomeDir(); err == nil {
+		searchPaths = append(searchPaths, filepath.Join(home, ".nuxmod", "bin", binName))
 		searchPaths = append(searchPaths, filepath.Join(home, ".vless-linux", "bin", binName))
 	}
 	if exe, err := os.Executable(); err == nil {

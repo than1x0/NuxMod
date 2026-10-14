@@ -12,8 +12,9 @@ import (
 )
 
 const (
-	ConfigDir  = "/etc/vless-linux"
-	ConfigFile = "profiles.json"
+	ConfigDir       = "/etc/nuxmod"
+	ConfigFile      = "profiles.json"
+	LegacyConfigDir = "/etc/vless-linux"
 )
 
 // Profile represents a saved VLESS connection profile.
@@ -42,15 +43,30 @@ type Manager struct {
 func getStorePath() string {
 	if os.Geteuid() == 0 {
 		_ = os.MkdirAll(ConfigDir, 0755)
-		return filepath.Join(ConfigDir, ConfigFile)
+		newPath := filepath.Join(ConfigDir, ConfigFile)
+		oldPath := filepath.Join(LegacyConfigDir, ConfigFile)
+		// Auto-migrate from legacy config if new file doesn't exist yet
+		if _, err := os.Stat(newPath); os.IsNotExist(err) {
+			if oldData, err := os.ReadFile(oldPath); err == nil {
+				_ = os.WriteFile(newPath, oldData, 0644)
+			}
+		}
+		return newPath
 	}
 	home, err := os.UserHomeDir()
 	if err != nil {
 		home = "."
 	}
-	dir := filepath.Join(home, ".vless-linux")
+	dir := filepath.Join(home, ".nuxmod")
 	_ = os.MkdirAll(dir, 0755)
-	return filepath.Join(dir, ConfigFile)
+	newPath := filepath.Join(dir, ConfigFile)
+	oldPath := filepath.Join(home, ".vless-linux", ConfigFile)
+	if _, err := os.Stat(newPath); os.IsNotExist(err) {
+		if oldData, err := os.ReadFile(oldPath); err == nil {
+			_ = os.WriteFile(newPath, oldData, 0644)
+		}
+	}
+	return newPath
 }
 
 func NewManager() (*Manager, error) {

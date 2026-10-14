@@ -19,13 +19,14 @@ const (
 // PrintBanner prints the application ASCII art banner.
 func PrintBanner() {
 	banner := `
-  _    _  _       ______   _____  _____ 
- | |  | || |     |  ____| / ____|/ ____|
- | |  | || |     | |__   | (___ | (___  
- | |  | || |     |  __|   \___ \ \___ \ 
-  \ \/ / | |____ | |____  ____) |____) |
-   \__/  |______||______||_____/|_____/ 
-     Linux System-Wide TUN Bypass Tool
+  _   _             __  __           _ 
+ | \ | |           |  \/  |         | |
+ |  \| |_   ___  __| \  / | ___   __| |
+ | . ` + "`" + ` | | | \ \/ /| |\/| |/ _ \ / _` + "`" + ` |
+ | |\  | |_| |>  < | |  | | (_) | (_| |
+ |_| \_|\__,_/_/\_\|_|  |_|\___/ \__,_|
+  Linux System-Wide TUN Bypass & VPN Client
+         Author: Sathira Laksahan
 `
 	fmt.Printf("%s%s%s\n", ColorCyan, banner, ColorReset)
 }
