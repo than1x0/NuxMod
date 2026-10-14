@@ -113,6 +113,16 @@ func (d *Daemon) getRecentLogs(count int) []string {
 
 // Run starts the daemon with the specified profile.
 func (d *Daemon) Run(ctx context.Context, prof *profile.Profile) error {
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	if prof == nil {
+		var err error
+		prof, err = d.profileMgr.GetActive()
+		if err != nil {
+			return fmt.Errorf("no profile available to run daemon: %w", err)
+		}
+	}
 	d.activeProfile = prof
 
 	sockPath := GetSocketPath()

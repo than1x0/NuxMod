@@ -4,6 +4,7 @@ import (
 	"bufio"
 	"fmt"
 	"os"
+	"strconv"
 	"strings"
 	"time"
 
@@ -27,56 +28,130 @@ const (
 	ClearScreen = "\033[H\033[2J"
 )
 
-// RunDashboard starts the live terminal dashboard loop.
-func RunDashboard(profMgr *profile.Manager) {
-	// Check if terminal input is available
-	inputChan := make(chan string)
-	go readKeyInputs(inputChan)
+type screenMode int
 
-	ticker := time.NewTicker(1 * time.Second)
+const (
+	modeDashboard screenMode = iota
+	modeAddProfile
+	modeDeleteProfile
+	modeSwitchProfile
+	modeLogs
+)
+
+// RunDashboard runs the interactive terminal dashboard.
+func RunDashboard(profMgr *profile.Manager) {
+	scanner := bufio.NewScanner(os.Stdin)
+	currentMode := modeDashboard
+
+	// Channel for user inputs from single scanner
+	inputChan := make(chan string)
+	go func() {
+		for scanner.Scan() {
+			inputChan <- strings.TrimSpace(scanner.Text())
+		}
+		close(inputChan)
+	}()
+
+	ticker := time.NewTicker(1500 * time.Millisecond)
 	defer ticker.Stop()
 
+	// Initial render
+	renderDashboard(profMgr)
+
 	for {
-		renderView(profMgr)
-
 		select {
-		case key := <-inputChan:
-			switch strings.ToLower(key) {
-			case "q":
-				fmt.Print("\n\033[33m[*] Dashboard closed. VPN connection is still running in the background!\033[0m\n")
-				fmt.Print("\033[36m[*] Run 'sudo vless-linux' at any time to reopen the dashboard.\033[0m\n\n")
+		case line, ok := <-inputChan:
+			if !ok {
 				return
+			}
+			switch currentMode {
+			case modeDashboard:
+				cmd := strings.ToLower(line)
+				switch cmd {
+				case "c":
+					handleConnectToggle(profMgr)
+					renderDashboard(profMgr)
 
-			case "x":
-				fmt.Print("\n\033[31m[*] Disconnecting and stopping VPN...\033[0m\n")
-				_, _ = daemon.SendIPCCommand(daemon.IPCRequest{Command: "DISCONNECT"}, 2*time.Second)
-				fmt.Print("\033[32m[+] Network routes restored cleanly. Goodbye!\033[0m\n\n")
-				return
+				case "p":
+					currentMode = modeSwitchProfile
+					promptSwitchProfile(profMgr)
 
-			case "c":
-				// Toggle connection
-				handleConnectToggle(profMgr)
+				case "a":
+					currentMode = modeAddProfile
+					promptAddProfile()
 
-			case "a":
-				handleAddProfile(profMgr)
+				case "d":
+					currentMode = modeDeleteProfile
+					promptDeleteProfile(profMgr)
 
-			case "d":
-				handleDeleteProfile(profMgr)
+				case "l":
+					currentMode = modeLogs
+					showLogsScreen()
 
-			case "p":
-				handleSwitchProfile(profMgr)
+				case "r", "":
+					renderDashboard(profMgr)
 
-			case "l":
-				showFullLogs()
+				case "q":
+					fmt.Print("\n" + Yellow + "[*] Dashboard closed. VPN is still running in the background!" + Reset + "\n")
+					fmt.Print(Cyan + "[*] Run 'sudo vless-linux' at any time to reopen the dashboard." + Reset + "\n\n")
+					return
+
+				case "x":
+					fmt.Print("\n" + Red + "[*] Disconnecting VPN and stopping background service..." + Reset + "\n")
+					_ = daemon.StopBackgroundDaemon()
+					fmt.Print(Green + "[+] System routes cleanly restored. Goodbye!" + Reset + "\n\n")
+					return
+
+				default:
+					fmt.Printf("\033[33mUnknown choice '%s'. Press [c, p, a, d, l, q, x]: \033[0m", line)
+				}
+
+			case modeAddProfile:
+				if strings.ToLower(line) == "c" || strings.ToLower(line) == "cancel" || line == "" {
+					currentMode = modeDashboard
+					renderDashboard(profMgr)
+					continue
+				}
+				processAddProfile(profMgr, line, scanner)
+				currentMode = modeDashboard
+				renderDashboard(profMgr)
+
+			case modeDeleteProfile:
+				if strings.ToLower(line) == "c" || strings.ToLower(line) == "cancel" || line == "" {
+					currentMode = modeDashboard
+					renderDashboard(profMgr)
+					continue
+				}
+				processDeleteProfile(profMgr, line)
+				currentMode = modeDashboard
+				renderDashboard(profMgr)
+
+			case modeSwitchProfile:
+				if strings.ToLower(line) == "c" || strings.ToLower(line) == "cancel" || line == "" {
+					currentMode = modeDashboard
+					renderDashboard(profMgr)
+					continue
+				}
+				processSwitchProfile(profMgr, line)
+				currentMode = modeDashboard
+				renderDashboard(profMgr)
+
+			case modeLogs:
+				// Any key returns from logs to dashboard
+				currentMode = modeDashboard
+				renderDashboard(profMgr)
 			}
 
 		case <-ticker.C:
-			// Next tick renders dashboard
+			// Live update only while in main dashboard mode
+			if currentMode == modeDashboard {
+				renderDashboard(profMgr)
+			}
 		}
 	}
 }
 
-func renderView(profMgr *profile.Manager) {
+func renderDashboard(profMgr *profile.Manager) {
 	fmt.Print(ClearScreen)
 
 	// Fetch daemon status over IPC
@@ -163,48 +238,56 @@ func renderView(profMgr *profile.Manager) {
 	}
 	fmt.Println(White + Bold + "└──────────────────────────────────────────────────────────────────────────────┘" + Reset)
 
-	// 6. Interactive Actions Bar
+	// 6. Actions Bar
 	fmt.Println(Cyan + Bold + "Actions:" + Reset)
 	fmt.Printf("  %s[c]%s Connect/Disconnect  %s[p]%s Switch Profile  %s[a]%s Add Profile  %s[d]%s Delete Profile\n",
 		Yellow+Bold, Reset, Yellow+Bold, Reset, Yellow+Bold, Reset, Yellow+Bold, Reset)
-	fmt.Printf("  %s[q]%s Exit to Terminal (Keep VPN Running)     %s[x]%s Disconnect & Exit\n",
-		Green+Bold, Reset, Red+Bold, Reset)
+	fmt.Printf("  %s[l]%s Full Logs           %s[q]%s Exit (Keep VPN Alive)   %s[x]%s Disconnect & Exit\n",
+		Yellow+Bold, Reset, Green+Bold, Reset, Red+Bold, Reset)
 	fmt.Print("\nEnter choice: ")
 }
 
 func handleConnectToggle(profMgr *profile.Manager) {
 	if daemon.IsDaemonRunning() {
-		fmt.Print("\n\033[33m[*] Disconnecting...\033[0m")
-		_, _ = daemon.SendIPCCommand(daemon.IPCRequest{Command: "DISCONNECT"}, 2*time.Second)
+		fmt.Println("\n\033[33m[*] Disconnecting VPN...\033[0m")
+		_ = daemon.StopBackgroundDaemon()
 		time.Sleep(500 * time.Millisecond)
 	} else {
-		prof, err := profMgr.GetActive()
+		activeProf, err := profMgr.GetActive()
 		if err != nil {
-			fmt.Println("\n\033[31m[-] No active profile to connect. Please add one first with [a]!\033[0m")
-			time.Sleep(1 * time.Second)
+			fmt.Println("\n\033[31m[-] No profile configured. Please add one first with [a]!\033[0m")
+			time.Sleep(1500 * time.Millisecond)
 			return
 		}
-		fmt.Printf("\n\033[32m[*] Starting background connection to [%s]...\033[0m\n", prof.Name)
-		go func() {
-			d := daemon.NewDaemon(profMgr)
-			_ = d.Run(nil, prof)
-		}()
-		time.Sleep(1 * time.Second)
+		fmt.Printf("\n\033[32m[*] Spawning background VPN daemon for [%s]...\033[0m\n", activeProf.Name)
+		if err := daemon.StartBackgroundDaemon(); err != nil {
+			fmt.Printf("\033[31m[-] Failed to start VPN: %v\033[0m\n", err)
+			time.Sleep(2 * time.Second)
+			return
+		}
+		fmt.Println("\033[32m[+] Connected successfully!\033[0m")
+		time.Sleep(800 * time.Millisecond)
 	}
 }
 
-func handleAddProfile(profMgr *profile.Manager) {
-	reader := bufio.NewReader(os.Stdin)
-	fmt.Print("\n\033[36mEnter VLESS Link (vless://...):\033[0m ")
-	link, _ := reader.ReadString('\n')
+func promptAddProfile() {
+	fmt.Print(ClearScreen)
+	fmt.Println(Cyan + Bold + "=== Add New VLESS Profile ===" + Reset)
+	fmt.Println("Paste your VLESS link below (or type 'c' to cancel):")
+	fmt.Print("\nLink: ")
+}
+
+func processAddProfile(profMgr *profile.Manager, link string, scanner *bufio.Scanner) {
 	link = strings.TrimSpace(link)
-	if link == "" {
+	if link == "" || strings.ToLower(link) == "c" || strings.ToLower(link) == "cancel" {
 		return
 	}
 
-	fmt.Print("\033[36mEnter Profile Name (optional, press Enter for auto):\033[0m ")
-	name, _ := reader.ReadString('\n')
-	name = strings.TrimSpace(name)
+	fmt.Print("Profile Name (optional, press Enter for auto): ")
+	var name string
+	if scanner.Scan() {
+		name = strings.TrimSpace(scanner.Text())
+	}
 
 	prof, err := profMgr.Add(link, name)
 	if err != nil {
@@ -217,103 +300,94 @@ func handleAddProfile(profMgr *profile.Manager) {
 	time.Sleep(1 * time.Second)
 }
 
-func handleDeleteProfile(profMgr *profile.Manager) {
-	reader := bufio.NewReader(os.Stdin)
-	fmt.Print("\n\033[33mEnter Profile Name or Number to delete:\033[0m ")
-	input, _ := reader.ReadString('\n')
-	input = strings.TrimSpace(input)
-	if input == "" {
-		return
-	}
-
-	// Check if user entered a number
+func promptDeleteProfile(profMgr *profile.Manager) {
+	fmt.Print(ClearScreen)
+	fmt.Println(Cyan + Bold + "=== Delete Profile ===" + Reset)
 	profiles := profMgr.List()
 	for i, p := range profiles {
-		if fmt.Sprintf("%d", i+1) == input {
-			input = p.ID
-			break
-		}
+		fmt.Printf("  %d. %s (%s:%d)\n", i+1, p.Name, p.Server, p.Port)
 	}
-
-	if err := profMgr.Delete(input); err != nil {
-		fmt.Printf("\n\033[31m[-] Error deleting profile: %v\033[0m\n", err)
-	} else {
-		fmt.Println("\n\033[32m[+] Profile deleted successfully.\033[0m")
-	}
-	time.Sleep(1 * time.Second)
+	fmt.Print("\nEnter profile number to delete (or 'c' to cancel): ")
 }
 
-func handleSwitchProfile(profMgr *profile.Manager) {
-	reader := bufio.NewReader(os.Stdin)
-	fmt.Print("\n\033[36mEnter Profile Number to activate:\033[0m ")
-	input, _ := reader.ReadString('\n')
+func processDeleteProfile(profMgr *profile.Manager, input string) {
 	input = strings.TrimSpace(input)
-	if input == "" {
+	if input == "" || strings.ToLower(input) == "c" || strings.ToLower(input) == "cancel" {
 		return
 	}
 
+	target := input
 	profiles := profMgr.List()
-	var targetID string
-	for i, p := range profiles {
-		if fmt.Sprintf("%d", i+1) == input || p.Name == input {
-			targetID = p.ID
-			break
-		}
+	if num, err := strconv.Atoi(input); err == nil && num >= 1 && num <= len(profiles) {
+		target = profiles[num-1].ID
 	}
 
-	if targetID == "" {
-		fmt.Println("\n\033[31m[-] Invalid profile number.\033[0m")
+	if err := profMgr.Delete(target); err != nil {
+		fmt.Printf("\n\033[31m[-] Delete error: %v\033[0m\n", err)
+		time.Sleep(2 * time.Second)
+	} else {
+		fmt.Println("\n\033[32m[+] Profile deleted.\033[0m")
 		time.Sleep(1 * time.Second)
+	}
+}
+
+func promptSwitchProfile(profMgr *profile.Manager) {
+	fmt.Print(ClearScreen)
+	fmt.Println(Cyan + Bold + "=== Switch Active Profile ===" + Reset)
+	profiles := profMgr.List()
+	for i, p := range profiles {
+		tag := ""
+		if p.Active {
+			tag = Green + " [ACTIVE]" + Reset
+		}
+		fmt.Printf("  %d. %s (%s:%d)%s\n", i+1, p.Name, p.Server, p.Port, tag)
+	}
+	fmt.Print("\nEnter profile number to activate (or 'c' to cancel): ")
+}
+
+func processSwitchProfile(profMgr *profile.Manager, input string) {
+	input = strings.TrimSpace(input)
+	if input == "" || strings.ToLower(input) == "c" || strings.ToLower(input) == "cancel" {
 		return
 	}
 
-	selected, err := profMgr.SetActive(targetID)
+	target := input
+	profiles := profMgr.List()
+	if num, err := strconv.Atoi(input); err == nil && num >= 1 && num <= len(profiles) {
+		target = profiles[num-1].ID
+	}
+
+	selected, err := profMgr.SetActive(target)
 	if err != nil {
 		fmt.Printf("\n\033[31m[-] Error: %v\033[0m\n", err)
-		time.Sleep(1 * time.Second)
+		time.Sleep(2 * time.Second)
 		return
 	}
 
-	fmt.Printf("\n\033[32m[+] Active profile switched to [%s]!\033[0m\n", selected.Name)
+	fmt.Printf("\n\033[32m[+] Active profile set to [%s]!\033[0m\n", selected.Name)
 
-	// If daemon is running, reconnect with new profile
+	// If daemon is running, reconnect it with the new profile
 	if daemon.IsDaemonRunning() {
-		fmt.Println("\033[33m[*] Reconnecting with new profile...\033[0m")
-		_, _ = daemon.SendIPCCommand(daemon.IPCRequest{Command: "DISCONNECT"}, 2*time.Second)
-		time.Sleep(1 * time.Second)
-		go func() {
-			d := daemon.NewDaemon(profMgr)
-			_ = d.Run(nil, selected)
-		}()
+		fmt.Println("\033[33m[*] Reconnecting daemon with new profile...\033[0m")
+		_ = daemon.StopBackgroundDaemon()
+		time.Sleep(500 * time.Millisecond)
+		_ = daemon.StartBackgroundDaemon()
 	}
 	time.Sleep(1 * time.Second)
 }
 
-func showFullLogs() {
+func showLogsScreen() {
 	resp, err := daemon.SendIPCCommand(daemon.IPCRequest{Command: "LOGS"}, 2*time.Second)
-	if err != nil || resp == nil || len(resp.Logs) == 0 {
-		fmt.Println("\n\033[33mNo logs available.\033[0m")
-		time.Sleep(1 * time.Second)
-		return
-	}
-
 	fmt.Print(ClearScreen)
 	fmt.Println(Cyan + Bold + "=== Full Event Logs (Last 50 Entries) ===" + Reset)
-	for _, l := range resp.Logs {
-		fmt.Println(l)
-	}
-	fmt.Println("\nPress Enter to return to Dashboard...")
-	_, _ = bufio.NewReader(os.Stdin).ReadString('\n')
-}
-
-func readKeyInputs(out chan string) {
-	scanner := bufio.NewScanner(os.Stdin)
-	for scanner.Scan() {
-		text := strings.TrimSpace(scanner.Text())
-		if text != "" {
-			out <- text
+	if err != nil || resp == nil || len(resp.Logs) == 0 {
+		fmt.Println("\n\033[33m[No logs available or VPN not running]\033[0m")
+	} else {
+		for _, l := range resp.Logs {
+			fmt.Println(l)
 		}
 	}
+	fmt.Println("\n\033[36mPress Enter to return to Dashboard...\033[0m")
 }
 
 func renderBar(currentBytes float64, maxBytes float64) string {

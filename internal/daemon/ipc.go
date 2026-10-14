@@ -5,7 +5,9 @@ import (
 	"fmt"
 	"net"
 	"os"
+	"os/exec"
 	"path/filepath"
+	"syscall"
 	"time"
 )
 
@@ -34,7 +36,7 @@ func GetPIDPath() string {
 
 // IPCRequest represents a request sent from CLI/TUI to the Daemon.
 type IPCRequest struct {
-	Command string `json:"command"` // "STATUS", "DISCONNECT", "SWITCH", "LOGS"
+	Command string `json:"command"` // "STATUS", "DISCONNECT", "SWITCH", "LOGS", "PING"
 	Payload string `json:"payload,omitempty"`
 }
 
@@ -90,4 +92,54 @@ func SendIPCCommand(req IPCRequest, timeout time.Duration) (*IPCResponse, error)
 func IsDaemonRunning() bool {
 	resp, err := SendIPCCommand(IPCRequest{Command: "PING"}, 500*time.Millisecond)
 	return err == nil && resp != nil && resp.Success
+}
+
+// StartBackgroundDaemon spawns the daemon in a detached background process.
+func StartBackgroundDaemon() error {
+	if IsDaemonRunning() {
+		return nil
+	}
+	selfPath, err := os.Executable()
+	if err != nil {
+		selfPath = "/usr/local/bin/vless-linux"
+	}
+
+	logPath := "/var/log/vless-linux.log"
+	logFile, err := os.OpenFile(logPath, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0644)
+	if err != nil {
+		logFile, _ = os.OpenFile("/tmp/vless-linux.log", os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0644)
+	}
+
+	cmd := exec.Command(selfPath, "__daemon")
+	cmd.SysProcAttr = &syscall.SysProcAttr{Setsid: true} // Detach from terminal
+	if logFile != nil {
+		cmd.Stdout = logFile
+		cmd.Stderr = logFile
+	}
+
+	if err := cmd.Start(); err != nil {
+		return fmt.Errorf("failed to spawn daemon process: %w", err)
+	}
+
+	// Wait up to 5 seconds for socket to respond
+	for i := 0; i < 50; i++ {
+		time.Sleep(100 * time.Millisecond)
+		if IsDaemonRunning() {
+			return nil
+		}
+	}
+	return fmt.Errorf("daemon process started but IPC socket is not ready yet (check /var/log/vless-linux.log)")
+}
+
+// StopBackgroundDaemon disconnects the running daemon cleanly.
+func StopBackgroundDaemon() error {
+	if !IsDaemonRunning() {
+		return nil
+	}
+	_, err := SendIPCCommand(IPCRequest{Command: "DISCONNECT"}, 3*time.Second)
+	if err != nil {
+		_ = exec.Command("killall", "-9", "sing-box", "vless-linux").Run()
+	}
+	time.Sleep(500 * time.Millisecond)
+	return nil
 }

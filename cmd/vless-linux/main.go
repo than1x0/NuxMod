@@ -4,10 +4,8 @@ import (
 	"context"
 	"fmt"
 	"os"
-	"os/exec"
 	"runtime"
 	"strings"
-	"syscall"
 	"time"
 
 	"github.com/Sathira-Laksahan/vless-linux/internal/daemon"
@@ -164,40 +162,19 @@ func handleConnect(profMgr *profile.Manager, args []string) {
 	_ = routing.CheckLinuxEnvironment()
 
 	// Spawn daemon as a detached background process
-	selfPath, err := os.Executable()
-	if err != nil {
-		selfPath = "/usr/local/bin/vless-linux"
-	}
-
-	cmd := exec.Command(selfPath, "__daemon")
-	cmd.SysProcAttr = &syscall.SysProcAttr{Setsid: true} // Detach from controlling terminal
-	if err := cmd.Start(); err != nil {
-		ui.Error("Failed to spawn background daemon: %v", err)
+	if err := daemon.StartBackgroundDaemon(); err != nil {
+		ui.Error("Failed to start VPN: %v", err)
 		os.Exit(1)
 	}
 
-	// Wait up to 3 seconds for IPC socket to become alive
-	ready := false
-	for i := 0; i < 30; i++ {
-		time.Sleep(100 * time.Millisecond)
-		if daemon.IsDaemonRunning() {
-			ready = true
-			break
-		}
-	}
-
-	if ready {
-		fmt.Println()
-		ui.Success("System-Wide TUN Bypass Connected Successfully!")
-		fmt.Printf("  • Profile:    %s%s%s\n", ui.ColorBold, activeProf.Name, ui.ColorReset)
-		fmt.Printf("  • Server:     %s:%d\n", activeProf.Server, activeProf.Port)
-		fmt.Printf("  • SNI:        %s\n", activeProf.SNI)
-		fmt.Printf("  • Interface:  tun0 (Full OS Routed)\n\n")
-		ui.Info("Background mode active. You can safely close this terminal window.")
-		ui.Info("Run '%ssudo vless-linux%s' at any time to open the live dashboard.", ui.ColorCyan, ui.ColorReset)
-	} else {
-		ui.Error("Daemon did not start within expected time. Check logs with 'vless-linux logs'.")
-	}
+	fmt.Println()
+	ui.Success("System-Wide TUN Bypass Connected Successfully!")
+	fmt.Printf("  • Profile:    %s%s%s\n", ui.ColorBold, activeProf.Name, ui.ColorReset)
+	fmt.Printf("  • Server:     %s:%d\n", activeProf.Server, activeProf.Port)
+	fmt.Printf("  • SNI:        %s\n", activeProf.SNI)
+	fmt.Printf("  • Interface:  tun0 (Full OS Routed)\n\n")
+	ui.Info("Background mode active. You can safely close this terminal window.")
+	ui.Info("Run '%ssudo vless-linux%s' at any time to open the live dashboard.", ui.ColorCyan, ui.ColorReset)
 }
 
 func handleDisconnect() {
@@ -207,12 +184,7 @@ func handleDisconnect() {
 	}
 
 	ui.Info("Sending disconnect signal to background daemon...")
-	resp, err := daemon.SendIPCCommand(daemon.IPCRequest{Command: "DISCONNECT"}, 3*time.Second)
-	if err != nil || (resp != nil && !resp.Success) {
-		// Fallback: kill process directly
-		_ = exec.Command("killall", "-9", "sing-box", "vless-linux").Run()
-	}
-	time.Sleep(500 * time.Millisecond)
+	_ = daemon.StopBackgroundDaemon()
 	ui.Success("VPN disconnected. System network routes and IPv6 cleanly restored.")
 }
 
