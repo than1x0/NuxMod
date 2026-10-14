@@ -259,6 +259,9 @@ func displayNodeInfo(cfg *parser.VlessConfig) {
 	fmt.Printf("  Security:        %s\n", cfg.Security)
 	fmt.Printf("  SNI Spoofing:    %s%s%s\n", ui.ColorGreen, cfg.SNI, ui.ColorReset)
 	fmt.Printf("  uTLS Fingerprint:%s%s%s\n", ui.ColorGreen, cfg.Fingerprint, ui.ColorReset)
+	if cfg.Insecure {
+		fmt.Printf("  Allow Insecure:  %strue (required for SNI spoofing)%s\n", ui.ColorYellow, ui.ColorReset)
+	}
 	if cfg.Flow != "" {
 		fmt.Printf("  Flow:            %s\n", cfg.Flow)
 	}

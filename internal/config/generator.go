@@ -123,15 +123,14 @@ func GenerateSingBoxConfig(vless *parser.VlessConfig) (*SingBoxConfig, error) {
 					Detour:  "proxy-out",
 				},
 				{
+					Tag:     "remote-dns-backup",
+					Address: "tls://8.8.8.8",
+					Detour:  "proxy-out",
+				},
+				{
 					Tag:     "local-dns",
 					Address: "local",
 					Detour:  "direct",
-				},
-			},
-			Rules: []DNSRuleConfig{
-				{
-					Outbound: []string{"any"},
-					Server:   "local-dns",
 				},
 			},
 			Strategy: "prefer_ipv4",
@@ -186,6 +185,7 @@ func GenerateSingBoxConfig(vless *parser.VlessConfig) (*SingBoxConfig, error) {
 		vlessOut.TLS = &TLSConfig{
 			Enabled:    true,
 			ServerName: vless.SNI,
+			Insecure:   vless.Insecure,
 			UTLS: &UTLSConfig{
 				Enabled:     true,
 				Fingerprint: fp,

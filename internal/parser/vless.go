@@ -24,6 +24,7 @@ type VlessConfig struct {
 	PublicKey   string `json:"public_key"`  // Reality public key
 	ShortID     string `json:"short_id"`    // Reality short id
 	ALPN        string `json:"alpn"`        // h2,http/1.1
+	Insecure    bool   `json:"insecure"`    // Skip certificate verification (required for SNI spoofing)
 }
 
 // ParseVlessLink parses a standard vless:// URI string into a VlessConfig struct.
@@ -124,6 +125,17 @@ func ParseVlessLink(rawURI string) (*VlessConfig, error) {
 
 	if alpn := query.Get("alpn"); alpn != "" {
 		cfg.ALPN = alpn
+	}
+
+	// In SNI spoofing, the SNI belongs to a spoofed domain (e.g. aka.ms, zoom.us)
+	// while the certificate belongs to the proxy server (e.g. lw03.sahanwickramasinghe.me).
+	// Therefore, certificate hostname validation must be skipped (Insecure = true).
+	insecureVal := query.Get("allowInsecure")
+	if insecureVal == "" {
+		insecureVal = query.Get("insecure")
+	}
+	if insecureVal == "1" || strings.ToLower(insecureVal) == "true" || (cfg.SNI != "" && cfg.SNI != cfg.Server) {
+		cfg.Insecure = true
 	}
 
 	return cfg, nil
