@@ -1,0 +1,41 @@
+# Compiled root binaries
+/vless-linux
+/vless-windows.exe
+*.exe
+*.exe~
+*.dll
+*.so
+*.dylib
+bin/
+sing-box
+sing-box.exe
+*.tar.gz
+*.zip
+
+# Environment & Private Configuration
+.env
+.env.*
+!.env.example
+*.env
+*.pem
+*.key
+*.crt
+*.cert
+
+# Session caches & generated runtime configs
+last_used.txt
+saved.txt
+config.json
+test-config.json
+*.local.json
+
+# Logs
+*.log
+
+# Editor & OS files
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
+*.swp
+*.swo
