@@ -1,5 +1,4 @@
 # Compiled root binaries
-/vless-linux
 /vless-windows.exe
 *.exe
 *.exe~
