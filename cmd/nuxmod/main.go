@@ -14,6 +14,7 @@ import (
 	"github.com/Sathira-Laksahan/vless-linux/internal/routing"
 	"github.com/Sathira-Laksahan/vless-linux/internal/tui"
 	"github.com/Sathira-Laksahan/vless-linux/internal/ui"
+	"github.com/Sathira-Laksahan/vless-linux/internal/updater"
 )
 
 const (
@@ -58,6 +59,10 @@ func main() {
 
 	case "logs":
 		handleLogs()
+
+	case "update", "upgrade":
+		checkRootPrivilege()
+		handleUpdate()
 
 	case "__daemon":
 		// Internal daemon entrypoint (runs in background detached)
@@ -104,6 +109,7 @@ func printUsage() {
 	fmt.Println("  nuxmod profile add <url> [name]   Save a new VLESS link as a profile")
 	fmt.Println("  nuxmod profile use <name|num>     Switch active profile")
 	fmt.Println("  nuxmod profile delete <name|num>  Delete a profile")
+	fmt.Println("  sudo nuxmod update                Check and update NuxMod to latest version")
 	fmt.Println("  nuxmod version                    Display tool version and author")
 	fmt.Println()
 	fmt.Println("Examples:")
@@ -338,4 +344,51 @@ func handleParse(args []string) {
 	fmt.Printf("  SNI Spoofing:    %s\n", vlessCfg.SNI)
 	fmt.Printf("  uTLS:            %s\n", vlessCfg.Fingerprint)
 	fmt.Println()
+}
+
+func handleUpdate() {
+	ui.PrintBanner()
+	ui.Header("NuxMod Software Self-Updater")
+	fmt.Printf("Current Version: v%s\n", updater.CurrentVersion)
+	fmt.Println("Checking GitHub for the latest release...")
+
+	info, err := updater.CheckForUpdate()
+	if err != nil {
+		ui.Error("Failed to check for updates: %v", err)
+		os.Exit(1)
+	}
+
+	if !info.HasUpdate {
+		ui.Success("You are already using the latest version (v%s)!", info.LatestVersion)
+		fmt.Print("Do you want to force re-download and reinstall anyway? [y/N]: ")
+		var answer string
+		fmt.Scanln(&answer)
+		answer = strings.ToLower(strings.TrimSpace(answer))
+		if answer != "y" && answer != "yes" {
+			fmt.Println("Update cancelled.")
+			return
+		}
+	} else {
+		ui.Info("A new version is available: v%s (Current: v%s)", info.LatestVersion, info.CurrentVersion)
+		if info.ReleaseNotes != "" {
+			fmt.Printf("\nRelease Notes:\n%s\n\n", info.ReleaseNotes)
+		}
+		fmt.Print("Proceed with upgrade? [Y/n]: ")
+		var answer string
+		fmt.Scanln(&answer)
+		answer = strings.ToLower(strings.TrimSpace(answer))
+		if answer == "n" || answer == "no" {
+			fmt.Println("Update cancelled.")
+			return
+		}
+	}
+
+	ui.Info("Downloading binary from: %s", info.DownloadURL)
+	if err := updater.DownloadAndInstall(info.DownloadURL); err != nil {
+		ui.Error("Update failed: %v", err)
+		os.Exit(1)
+	}
+
+	ui.Success("Successfully upgraded NuxMod to v%s!", info.LatestVersion)
+	fmt.Println("You can now run 'sudo nuxmod' to launch the updated tool.")
 }

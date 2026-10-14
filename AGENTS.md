@@ -47,8 +47,10 @@
 │   │   └── routing.go
 │   ├── tui/                # Tokyo Night / Bluloco 4-panel dashboard with live sparkline wave
 │   │   └── dashboard.go
-│   └── ui/                 # CLI banners, formatted success/error messages
-│       └── terminal.go
+│   ├── ui/                 # CLI banners, formatted success/error messages
+│   │   └── terminal.go
+│   └── updater/            # GitHub Releases self-updater & in-place binary installer
+│       └── updater.go
 ├── scripts/
 │   └── install.sh          # Global system installer & 1-line curl script
 ├── dist/                   # Release packages (.tar.gz archives)

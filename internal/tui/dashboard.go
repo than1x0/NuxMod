@@ -14,6 +14,7 @@ import (
 
 	"github.com/Sathira-Laksahan/vless-linux/internal/daemon"
 	"github.com/Sathira-Laksahan/vless-linux/internal/profile"
+	"github.com/Sathira-Laksahan/vless-linux/internal/updater"
 )
 
 // Bluloco / Tokyo Night 24-bit TrueColor Palette (Matching Reference Screenshot)
@@ -50,6 +51,7 @@ const (
 	modeDeleteProfile
 	modeSwitchProfile
 	modeLogs
+	modeUpdate
 )
 
 var (
@@ -191,6 +193,10 @@ func RunDashboard(profMgr *profile.Manager) {
 					currentMode = modeLogs
 					showLogsScreen()
 
+				case "u":
+					currentMode = modeUpdate
+					promptUpdateScreen()
+
 				case "r", "":
 					renderDashboard(profMgr)
 
@@ -240,6 +246,16 @@ func RunDashboard(profMgr *profile.Manager) {
 				renderDashboard(profMgr)
 
 			case modeLogs:
+				currentMode = modeDashboard
+				renderDashboard(profMgr)
+
+			case modeUpdate:
+				if strings.ToLower(line) == "c" || strings.ToLower(line) == "cancel" || line == "" {
+					currentMode = modeDashboard
+					renderDashboard(profMgr)
+					continue
+				}
+				processUpdateScreen(profMgr, line, scanner)
 				currentMode = modeDashboard
 				renderDashboard(profMgr)
 			}
@@ -631,7 +647,7 @@ func renderTrafficWavePanel(status *daemon.DaemonStatus, w int) []string {
 	}
 	lines[7] = wrapBoxLine(AccentGreen+"● "+Reset+colorizeLog(truncate(log1, maxLogLen)), w)
 	lines[8] = wrapBoxLine(AccentCyan+"● "+Reset+colorizeLog(truncate(log2, maxLogLen)), w)
-	lines[9] = wrapBoxLine(TagBracket+"["+AccentCoral+"l"+TagBracket+"] "+TextMuted+"full logs  "+TagBracket+"["+AccentCoral+"q"+TagBracket+"] "+TextMuted+"detach  "+TagBracket+"["+AccentCoral+"x"+TagBracket+"] "+TextMuted+"quit"+Reset, w)
+	lines[9] = wrapBoxLine(TagBracket+"["+AccentCoral+"u"+TagBracket+"] "+TextMuted+"update  "+TagBracket+"["+AccentCoral+"q"+TagBracket+"] "+TextMuted+"detach  "+TagBracket+"["+AccentCoral+"x"+TagBracket+"] "+TextMuted+"quit"+Reset, w)
 	lines[10] = BorderColor + "╰" + strings.Repeat("─", w-2) + "╯" + Reset
 	return lines
 }
@@ -651,6 +667,7 @@ func buildFooterBar(status *daemon.DaemonStatus, now time.Time, termWidth int) s
 		AccentCoral + "a" + Reset + TextMuted + ":add " +
 		AccentCoral + "d" + Reset + TextMuted + ":del " +
 		AccentCoral + "l" + Reset + TextMuted + ":logs " +
+		AccentCoral + "u" + Reset + TextMuted + ":update " +
 		AccentGreen + "q" + Reset + TextMuted + ":detach " +
 		AccentRose + "x" + Reset + TextMuted + ":exit" + Reset
 
@@ -844,6 +861,88 @@ func showLogsScreen() {
 		}
 	}
 	fmt.Println("\n" + TextMuted + "Press Enter to return to Dashboard..." + Reset)
+}
+
+var lastUpdateInfo *updater.UpdateInfo
+
+func promptUpdateScreen() {
+	termWidth, _ := getTerminalSize()
+	if termWidth < 80 {
+		termWidth = 80
+	}
+	fmt.Print(ClearScreen)
+	title := "NuxMod Core Engine & System Software Self-Updater"
+	pad := (termWidth - 2 - len(title)) / 2
+	if pad < 0 {
+		pad = 0
+	}
+	fmt.Println(BorderColor + "╭" + strings.Repeat("─", termWidth-2) + "╮" + Reset)
+	fmt.Println(BorderColor + "│" + Reset + strings.Repeat(" ", pad) + AccentCyan + Bold + title + Reset + strings.Repeat(" ", termWidth-2-len(title)-pad) + BorderColor + "│" + Reset)
+	fmt.Println(BorderColor + "╰" + strings.Repeat("─", termWidth-2) + "╯" + Reset)
+
+	fmt.Printf("  %sCurrent Installed Version:%s  %sv%s%s\n", TextMuted, Reset, AccentGreen+Bold, updater.CurrentVersion, Reset)
+	fmt.Printf("  %sInstall Destination:%s        %s\n", TextMuted, Reset, updater.InstallPath)
+	fmt.Printf("  %sRepository:%s                 %shttps://github.com/%s%s\n\n", TextMuted, Reset, AccentBlue, updater.GitHubRepo, Reset)
+
+	fmt.Println(AccentAmber + "  [*] Checking GitHub for latest release tag and assets..." + Reset)
+	info, err := updater.CheckForUpdate()
+	lastUpdateInfo = info
+
+	if err != nil {
+		fmt.Printf("\n  %s[-] Network error checking updates: %v%s\n", AccentRose, err, Reset)
+		fmt.Println(TextMuted + "\n  Press Enter or 'c' to return to dashboard..." + Reset)
+		fmt.Print(AccentCoral + "\nAction ❯ " + Reset)
+		return
+	}
+
+	if info != nil && info.HasUpdate {
+		fmt.Printf("\n  %s[★] NEW VERSION AVAILABLE:%s %sv%s%s (Installed: v%s)\n", AccentGreen+Bold, Reset, AccentCyan+Bold, info.LatestVersion, Reset, info.CurrentVersion)
+		if info.ReleaseNotes != "" {
+			fmt.Println(BorderColor + "  ─ Release Notes ─────────────────────────────────" + Reset)
+			lines := strings.Split(info.ReleaseNotes, "\n")
+			for i, l := range lines {
+				if i >= 6 {
+					fmt.Println("    " + TextMuted + "... (truncated)" + Reset)
+					break
+				}
+				fmt.Println("    " + TextMain + l + Reset)
+			}
+			fmt.Println(BorderColor + "  ────────────────────────────────────────────────" + Reset)
+		}
+		fmt.Print(AccentGreen + "\n  Proceed with automated download & in-place upgrade? (y/n or 'c') ❯ " + Reset)
+	} else {
+		fmt.Printf("\n  %s[✔] You are currently running the latest version (v%s).%s\n", AccentGreen, updater.CurrentVersion, Reset)
+		fmt.Print(TextMuted + "\n  Force re-download and reinstall latest build anyway? (y/n or 'c') ❯ " + Reset)
+	}
+}
+
+func processUpdateScreen(profMgr *profile.Manager, input string, scanner *bufio.Scanner) {
+	input = strings.ToLower(strings.TrimSpace(input))
+	if input != "y" && input != "yes" {
+		return
+	}
+
+	downloadURL := ""
+	if lastUpdateInfo != nil && lastUpdateInfo.DownloadURL != "" {
+		downloadURL = lastUpdateInfo.DownloadURL
+	}
+
+	fmt.Println()
+	fmt.Println(AccentAmber + "  [*] Contacting server & downloading updated binary..." + Reset)
+	fmt.Printf("      Source: %s\n", downloadURL)
+
+	err := updater.DownloadAndInstall(downloadURL)
+	if err != nil {
+		fmt.Printf("\n  %s[-] Update failed: %v%s\n", AccentRose, err, Reset)
+		fmt.Println(TextMuted + "  Returning to dashboard..." + Reset)
+		time.Sleep(3 * time.Second)
+		return
+	}
+
+	fmt.Printf("\n  %s[+] In-place upgrade applied to %s!%s\n", AccentGreen+Bold, updater.InstallPath, Reset)
+	fmt.Printf("  %s[+] Capabilities (cap_net_admin) and symlinks verified.%s\n", AccentGreen, Reset)
+	fmt.Println(AccentCyan + "  [★] NuxMod has been successfully updated." + Reset)
+	time.Sleep(2 * time.Second)
 }
 
 // Visual Helpers

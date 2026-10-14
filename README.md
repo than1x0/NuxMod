@@ -122,6 +122,7 @@ sudo nuxmod
 | `a` | **Add Node** | Prompts to paste a new `vless://` link and save it |
 | `d` | **Delete Node** | Removes an unwanted profile from `/etc/nuxmod/profiles.json` |
 | `l` | **Live Logs** | Views the last 50 detailed connection & DNS query events |
+| `u` | **Update Tool** | Checks GitHub and performs an in-place self-upgrade |
 | `r` | **Refresh** | Forces an immediate screen and bandwidth poll |
 | `q` | **Detach** | **Exits dashboard while VPN continues running in the background!** |
 | `x` | **Exit & Kill** | Disconnects VPN, restores original network routes, and exits |
@@ -131,6 +132,9 @@ sudo nuxmod
 ### 2. Command-Line (CLI) Shortcuts
 
 ```bash
+# Check GitHub and self-update NuxMod to the latest version
+sudo nuxmod update
+
 # Connect to your active saved profile in the background
 sudo nuxmod connect
 
