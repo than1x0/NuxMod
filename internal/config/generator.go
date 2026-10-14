@@ -3,19 +3,22 @@ package config
 import (
 	"encoding/json"
 	"fmt"
+	"net"
+	"net/http"
 	"os"
 	"path/filepath"
+	"time"
 
 	"github.com/Sathira-Laksahan/vless-linux/internal/parser"
 )
 
 // SingBoxConfig represents the top-level Sing-box configuration.
 type SingBoxConfig struct {
-	Log       LogConfig       `json:"log"`
-	DNS       DNSConfig       `json:"dns"`
-	Inbounds  []InboundConfig `json:"inbounds"`
-	Outbounds []any           `json:"outbounds"`
-	Route     RouteConfig     `json:"route"`
+	Log       LogConfig   `json:"log"`
+	DNS       DNSConfig   `json:"dns"`
+	Inbounds  []any       `json:"inbounds"`
+	Outbounds []any       `json:"outbounds"`
+	Route     RouteConfig `json:"route"`
 }
 
 type LogConfig struct {
@@ -52,12 +55,24 @@ type InboundConfig struct {
 	SniffOverrideDestination bool   `json:"sniff_override_destination"`
 }
 
+type MixedInboundConfig struct {
+	Type       string `json:"type"`
+	Tag        string `json:"tag"`
+	Listen     string `json:"listen"`
+	ListenPort int    `json:"listen_port"`
+}
+
 type DirectOutbound struct {
 	Type string `json:"type"`
 	Tag  string `json:"tag"`
 }
 
 type DNSOutbound struct {
+	Type string `json:"type"`
+	Tag  string `json:"tag"`
+}
+
+type BlockOutbound struct {
 	Type string `json:"type"`
 	Tag  string `json:"tag"`
 }
@@ -94,6 +109,8 @@ type VlessOutbound struct {
 
 type RouteRuleConfig struct {
 	Protocol    string   `json:"protocol,omitempty"`
+	Port        []uint16 `json:"port,omitempty"`
+	Network     string   `json:"network,omitempty"`
 	IPIsPrivate bool     `json:"ip_is_private,omitempty"`
 	Outbound    string   `json:"outbound"`
 }
@@ -118,13 +135,23 @@ func GenerateSingBoxConfig(vless *parser.VlessConfig) (*SingBoxConfig, error) {
 		DNS: DNSConfig{
 			Servers: []DNSServerConfig{
 				{
-					Tag:     "remote-dns",
-					Address: "tls://1.1.1.1",
+					Tag:     "remote-dns-tcp",
+					Address: "tcp://1.1.1.1",
 					Detour:  "proxy-out",
 				},
 				{
-					Tag:     "remote-dns-backup",
-					Address: "tls://8.8.8.8",
+					Tag:     "remote-dns-udp",
+					Address: "1.1.1.1",
+					Detour:  "proxy-out",
+				},
+				{
+					Tag:     "google-dns-tcp",
+					Address: "tcp://8.8.8.8",
+					Detour:  "proxy-out",
+				},
+				{
+					Tag:     "google-dns-udp",
+					Address: "8.8.8.8",
 					Detour:  "proxy-out",
 				},
 				{
@@ -135,17 +162,23 @@ func GenerateSingBoxConfig(vless *parser.VlessConfig) (*SingBoxConfig, error) {
 			},
 			Strategy: "prefer_ipv4",
 		},
-		Inbounds: []InboundConfig{
-			{
+		Inbounds: []any{
+			InboundConfig{
 				Type:                     "tun",
 				Tag:                      "tun-in",
 				InterfaceName:            "tun0",
 				Inet4Address:             "172.19.0.1/30",
 				AutoRoute:                true,
-				StrictRoute:              true,
+				StrictRoute:              false,
 				Stack:                    "gvisor",
 				Sniff:                    true,
 				SniffOverrideDestination: false,
+			},
+			MixedInboundConfig{
+				Type:       "mixed",
+				Tag:        "mixed-in",
+				Listen:     "127.0.0.1",
+				ListenPort: 10808,
 			},
 		},
 		Route: RouteConfig{
@@ -154,6 +187,15 @@ func GenerateSingBoxConfig(vless *parser.VlessConfig) (*SingBoxConfig, error) {
 				{
 					Protocol: "dns",
 					Outbound: "dns-out",
+				},
+				{
+					Port:     []uint16{53},
+					Outbound: "dns-out",
+				},
+				{
+					Port:     []uint16{443},
+					Network:  "udp",
+					Outbound: "block",
 				},
 				{
 					IPIsPrivate: true,
@@ -168,11 +210,10 @@ func GenerateSingBoxConfig(vless *parser.VlessConfig) (*SingBoxConfig, error) {
 	vlessOut := VlessOutbound{
 		Type:       "vless",
 		Tag:        "proxy-out",
-		Server:     vless.Server,
+		Server:     ResolveHost(vless.Server),
 		ServerPort: vless.Port,
 		UUID:       vless.UUID,
 		Flow:       vless.Flow,
-		Network:    vless.Network,
 	}
 
 	// TLS & uTLS setup
@@ -216,6 +257,10 @@ func GenerateSingBoxConfig(vless *parser.VlessConfig) (*SingBoxConfig, error) {
 			Type: "dns",
 			Tag:  "dns-out",
 		},
+		BlockOutbound{
+			Type: "block",
+			Tag:  "block",
+		},
 	}
 
 	return cfg, nil
@@ -238,4 +283,46 @@ func SaveConfigToFile(cfg *SingBoxConfig, outputPath string) error {
 	}
 
 	return nil
+}
+
+// ResolveHost resolves a hostname to an IP address to avoid bootstrap DNS deadlocks on restricted networks.
+func ResolveHost(host string) string {
+	if net.ParseIP(host) != nil {
+		return host
+	}
+
+	// 1. Try local system DNS
+	if ips, err := net.LookupIP(host); err == nil && len(ips) > 0 {
+		for _, ip := range ips {
+			if ip.To4() != nil {
+				return ip.String()
+			}
+		}
+	}
+
+	// 2. Fallback: Cloudflare DoH over HTTPS (port 443 is typically open on bypass packages)
+	client := &http.Client{Timeout: 3 * time.Second}
+	req, err := http.NewRequest("GET", "https://1.1.1.1/dns-query?name="+host+"&type=A", nil)
+	if err == nil {
+		req.Header.Set("Accept", "application/dns-json")
+		resp, err := client.Do(req)
+		if err == nil && resp.StatusCode == http.StatusOK {
+			defer resp.Body.Close()
+			var result struct {
+				Answer []struct {
+					Type int    `json:"type"`
+					Data string `json:"data"`
+				} `json:"Answer"`
+			}
+			if err := json.NewDecoder(resp.Body).Decode(&result); err == nil {
+				for _, ans := range result.Answer {
+					if ans.Type == 1 && net.ParseIP(ans.Data) != nil {
+						return ans.Data
+					}
+				}
+			}
+		}
+	}
+
+	return host
 }
