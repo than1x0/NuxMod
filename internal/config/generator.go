@@ -1,6 +1,7 @@
 package config
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"net"
@@ -160,7 +161,7 @@ func GenerateSingBoxConfig(vless *parser.VlessConfig) (*SingBoxConfig, error) {
 					Detour:  "direct",
 				},
 			},
-			Strategy: "prefer_ipv4",
+			Strategy: "ipv4_only",
 		},
 		Inbounds: []any{
 			InboundConfig{
@@ -291,8 +292,19 @@ func ResolveHost(host string) string {
 		return host
 	}
 
-	// 1. Try local system DNS
-	if ips, err := net.LookupIP(host); err == nil && len(ips) > 0 {
+	// Known default host mappings (fallback for zero-rated bootstrapping)
+	var knownHosts = map[string]string{
+		"lw03.sahanwickramasinghe.me": "172.255.210.120",
+	}
+
+	// 1. Try local system DNS with a quick 2-second timeout
+	resolver := &net.Resolver{
+		PreferGo: true,
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+
+	if ips, err := resolver.LookupIP(ctx, "ip4", host); err == nil && len(ips) > 0 {
 		for _, ip := range ips {
 			if ip.To4() != nil {
 				return ip.String()
@@ -301,8 +313,8 @@ func ResolveHost(host string) string {
 	}
 
 	// 2. Fallback: Cloudflare DoH over HTTPS (port 443 is typically open on bypass packages)
-	client := &http.Client{Timeout: 3 * time.Second}
-	req, err := http.NewRequest("GET", "https://1.1.1.1/dns-query?name="+host+"&type=A", nil)
+	client := &http.Client{Timeout: 2 * time.Second}
+	req, err := http.NewRequestWithContext(ctx, "GET", "https://1.1.1.1/dns-query?name="+host+"&type=A", nil)
 	if err == nil {
 		req.Header.Set("Accept", "application/dns-json")
 		resp, err := client.Do(req)
@@ -322,6 +334,11 @@ func ResolveHost(host string) string {
 				}
 			}
 		}
+	}
+
+	// 3. Fallback: Check known hosts
+	if ip, ok := knownHosts[host]; ok {
+		return ip
 	}
 
 	return host

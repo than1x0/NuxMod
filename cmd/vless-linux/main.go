@@ -5,8 +5,10 @@ import (
 	"flag"
 	"fmt"
 	"os"
+	"os/exec"
 	"os/signal"
 	"path/filepath"
+	"runtime"
 	"syscall"
 	"time"
 
@@ -152,6 +154,12 @@ func handleConnect(args []string) {
 	}
 	ui.Success("Using Sing-box core: %s", binPath)
 
+	// Clean up any stale sing-box process
+	if runtime.GOOS == "linux" {
+		_ = exec.Command("killall", "-9", "sing-box").Run()
+		setIPv6Disabled(true)
+	}
+
 	// Start Engine
 	ui.Header("Starting System-Wide TUN Bypass")
 	ui.Info("Creating Virtual TUN device 'tun0'...")
@@ -161,6 +169,10 @@ func handleConnect(args []string) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
+	cleanup := func() {
+		setIPv6Disabled(false)
+	}
+
 	// Intercept Ctrl+C / SIGINT / SIGTERM for safe cleanup
 	sigChan := make(chan os.Signal, 1)
 	signal.Notify(sigChan, os.Interrupt, syscall.SIGTERM)
@@ -169,12 +181,14 @@ func handleConnect(args []string) {
 		<-sigChan
 		ui.Warn("\nDisconnect signal received! Cleaning up network routes and TUN interface...")
 		_ = mgr.Stop()
+		cleanup()
 		cancel()
 		ui.Success("Network routes restored cleanly. Goodbye!")
 		os.Exit(0)
 	}()
 
 	if err := mgr.Start(ctx, os.Stdout, os.Stderr); err != nil {
+		cleanup()
 		ui.Error("Failed to start bypass engine: %v", err)
 		os.Exit(1)
 	}
@@ -183,6 +197,20 @@ func handleConnect(args []string) {
 	if err := mgr.Wait(); err != nil {
 		ui.Error("Engine exited with error: %v", err)
 	}
+	cleanup()
+}
+
+func setIPv6Disabled(disabled bool) {
+	if runtime.GOOS != "linux" {
+		return
+	}
+	val := "0"
+	if disabled {
+		val = "1"
+	}
+	_ = os.WriteFile("/proc/sys/net/ipv6/conf/all/disable_ipv6", []byte(val), 0644)
+	_ = os.WriteFile("/proc/sys/net/ipv6/conf/default/disable_ipv6", []byte(val), 0644)
+	_ = exec.Command("sysctl", "-w", fmt.Sprintf("net.ipv6.conf.all.disable_ipv6=%s", val)).Run()
 }
 
 func handleParse(args []string) {

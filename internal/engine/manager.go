@@ -36,21 +36,36 @@ func NewEngineManager(configPath string) *EngineManager {
 
 // EnsureBinary checks if sing-box binary exists, or downloads it to targetDir.
 func (m *EngineManager) EnsureBinary(targetDir string) (string, error) {
-	// 1. Check if sing-box is already in system PATH
-	if path, err := exec.LookPath("sing-box"); err == nil {
-		m.BinaryPath = path
-		return path, nil
-	}
-
-	// 2. Check if already downloaded to targetDir
 	binName := "sing-box"
 	if runtime.GOOS == "windows" {
 		binName = "sing-box.exe"
 	}
-	localPath := filepath.Join(targetDir, binName)
-	if _, err := os.Stat(localPath); err == nil {
-		m.BinaryPath = localPath
-		return localPath, nil
+
+	// 1. Check if sing-box is already in system PATH
+	if path, err := exec.LookPath(binName); err == nil {
+		m.BinaryPath = path
+		return path, nil
+	}
+
+	// 2. Check common search locations on Linux/Windows
+	searchPaths := []string{
+		filepath.Join(targetDir, binName),
+		filepath.Join("/usr/local/bin", binName),
+		filepath.Join("/usr/bin", binName),
+		filepath.Join("/root/.vless-linux/bin", binName),
+	}
+	if home, err := os.UserHomeDir(); err == nil {
+		searchPaths = append(searchPaths, filepath.Join(home, ".vless-linux", "bin", binName))
+	}
+	if exe, err := os.Executable(); err == nil {
+		searchPaths = append(searchPaths, filepath.Join(filepath.Dir(exe), binName))
+	}
+
+	for _, p := range searchPaths {
+		if _, err := os.Stat(p); err == nil {
+			m.BinaryPath = p
+			return p, nil
+		}
 	}
 
 	// 3. Download appropriate binary for OS/Arch
@@ -68,6 +83,7 @@ func (m *EngineManager) EnsureBinary(targetDir string) (string, error) {
 		return "", fmt.Errorf("failed to download sing-box: %w", err)
 	}
 
+	localPath := filepath.Join(targetDir, binName)
 	m.BinaryPath = localPath
 	return localPath, nil
 }
