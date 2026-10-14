@@ -6,6 +6,7 @@ RED='\033[0;31m'
 GREEN='\033[0;32m'
 YELLOW='\033[1;33m'
 BLUE='\033[0;34m'
+CYAN='\033[0;36m'
 NC='\033[0m' # No Color
 
 echo -e "${BLUE}==============================================${NC}"
@@ -34,17 +35,6 @@ esac
 
 echo -e "${YELLOW}[*] Detected architecture: $GOARCH${NC}"
 
-# Install dependencies if missing
-echo -e "${YELLOW}[*] Checking required system packages...${NC}"
-if command -v apt-get &> /dev/null; then
-  apt-get update -qq
-  apt-get install -y -qq curl tar iproute2 iptables > /dev/null
-elif command -v pacman &> /dev/null; then
-  pacman -Sy --noconfirm curl tar iproute2 iptables > /dev/null
-elif command -v dnf &> /dev/null; then
-  dnf install -y -q curl tar iproute iptables > /dev/null
-fi
-
 # Ensure /dev/net/tun exists
 if [ ! -c /dev/net/tun ]; then
   echo -e "${YELLOW}[*] Creating /dev/net/tun device...${NC}"
@@ -53,23 +43,41 @@ if [ ! -c /dev/net/tun ]; then
   chmod 666 /dev/net/tun
 fi
 
-# Install sing-box core
+# Create system config directory
+mkdir -p /etc/vless-linux
+chmod 755 /etc/vless-linux
+
+# Install sing-box core binary
 SINGBOX_VERSION="1.8.14"
-SINGBOX_URL="https://github.com/SagerNet/sing-box/releases/download/v${SINGBOX_VERSION}/sing-box-${SINGBOX_VERSION}-linux-${GOARCH}.tar.gz"
-
-echo -e "${YELLOW}[*] Installing Sing-box core v${SINGBOX_VERSION}...${NC}"
-TMP_DIR=$(mktemp -d)
-curl -fsSL "$SINGBOX_URL" -o "$TMP_DIR/sing-box.tar.gz"
-tar -xzf "$TMP_DIR/sing-box.tar.gz" -C "$TMP_DIR"
-cp "$TMP_DIR"/sing-box-*/sing-box /usr/local/bin/sing-box
-chmod +x /usr/local/bin/sing-box
-rm -rf "$TMP_DIR"
-
-# Allow sing-box to bind TUN interfaces without root
-setcap cap_net_admin,cap_net_bind_service+ep /usr/local/bin/sing-box || true
-
-# If precompiled vless-linux binary exists in directory, install it
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+
+if [ -f "/usr/local/bin/sing-box" ]; then
+  echo -e "${GREEN}[+] Sing-box core already present at /usr/local/bin/sing-box${NC}"
+elif [ -f "/root/.vless-linux/bin/sing-box" ]; then
+  echo -e "${YELLOW}[*] Installing Sing-box core from local cache...${NC}"
+  cp /root/.vless-linux/bin/sing-box /usr/local/bin/sing-box
+  chmod +x /usr/local/bin/sing-box
+elif [ -f "$SCRIPT_DIR/sing-box" ]; then
+  cp "$SCRIPT_DIR/sing-box" /usr/local/bin/sing-box
+  chmod +x /usr/local/bin/sing-box
+else
+  echo -e "${YELLOW}[*] Downloading Sing-box core v${SINGBOX_VERSION}...${NC}"
+  TMP_DIR=$(mktemp -d)
+  SINGBOX_URL="https://github.com/SagerNet/sing-box/releases/download/v${SINGBOX_VERSION}/sing-box-${SINGBOX_VERSION}-linux-${GOARCH}.tar.gz"
+  curl -fsSL "$SINGBOX_URL" -o "$TMP_DIR/sing-box.tar.gz" || true
+  if [ -f "$TMP_DIR/sing-box.tar.gz" ]; then
+    tar -xzf "$TMP_DIR/sing-box.tar.gz" -C "$TMP_DIR"
+    cp "$TMP_DIR"/sing-box-*/sing-box /usr/local/bin/sing-box
+    chmod +x /usr/local/bin/sing-box
+  fi
+  rm -rf "$TMP_DIR"
+fi
+
+if [ -f "/usr/local/bin/sing-box" ]; then
+  setcap cap_net_admin,cap_net_bind_service+ep /usr/local/bin/sing-box || true
+fi
+
+# Install vless-linux binary to /usr/local/bin
 if [ -f "$SCRIPT_DIR/vless-linux" ]; then
   echo -e "${YELLOW}[*] Installing vless-linux binary to /usr/local/bin...${NC}"
   cp "$SCRIPT_DIR/vless-linux" /usr/local/bin/vless-linux
@@ -80,10 +88,13 @@ elif command -v go &> /dev/null; then
   go build -ldflags="-s -w" -o /usr/local/bin/vless-linux ./cmd/vless-linux
   chmod +x /usr/local/bin/vless-linux
 else
-  echo -e "${YELLOW}[!] Note: vless-linux binary will need to be placed at /usr/local/bin/vless-linux${NC}"
+  echo -e "${RED}[-] Error: vless-linux binary not found in $SCRIPT_DIR${NC}"
+  exit 1
 fi
 
-# Setup systemd service file
+setcap cap_net_admin,cap_net_bind_service+ep /usr/local/bin/vless-linux || true
+
+# Setup systemd service template
 echo -e "${YELLOW}[*] Installing systemd service template...${NC}"
 cat << 'EOF' > /etc/systemd/system/vless-linux.service
 [Unit]
@@ -95,7 +106,7 @@ Wants=network-online.target
 Type=simple
 ExecStart=/usr/local/bin/vless-linux connect
 Restart=always
-RestartSec=5s
+RestartSec=3s
 LimitNOFILE=65535
 
 [Install]
@@ -105,9 +116,12 @@ EOF
 systemctl daemon-reload
 
 echo -e "${GREEN}==============================================${NC}"
-echo -e "${GREEN}[+] Installation Completed Successfully!      ${NC}"
+echo -e "${GREEN}[+] Tool Installed Globally to /usr/local/bin!${NC}"
 echo -e "${GREEN}==============================================${NC}"
-echo -e "To connect your system, run:"
-echo -e "  ${BLUE}sudo vless-linux connect \"your_vless_link\"${NC}\n"
-echo -e "To auto-connect on system boot via systemd:"
-echo -e "  ${BLUE}sudo systemctl enable --now vless-linux${NC}\n"
+echo -e "${CYAN}[i] You can now safely delete the source/setup folder if you wish.${NC}\n"
+echo -e "Usage:"
+echo -e "  ${BLUE}sudo vless-linux${NC}                       -> Launch Interactive TUI Dashboard"
+echo -e "  ${BLUE}sudo vless-linux connect${NC}               -> Connect in background (terminal close won't drop)"
+echo -e "  ${BLUE}sudo vless-linux disconnect${NC}            -> Disconnect cleanly"
+echo -e "  ${BLUE}vless-linux status${NC}                     -> Check live speed and status"
+echo -e "  ${BLUE}vless-linux profile add \"<url>\" [name]${NC}  -> Add a new VLESS profile\n"

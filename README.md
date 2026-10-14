@@ -1,110 +1,114 @@
-# 🚀 VLESS Linux — System-Wide TUN Bypass Tool (Go)
+# 🚀 VLESS Linux — System-Wide TUN Bypass & TUI Dashboard Tool (Go)
 
-A high-performance, native Linux system-wide VPN & proxy bypass tool built with **Go (Golang)**. It converts any `vless://` link (with TLS, SNI spoofing, and Chrome uTLS fingerprints) into a full-OS virtual network adapter (`tun0`) on Linux — routing **Web Browsers, Terminal/Bash/Curl, Docker, and all background services**, exactly like **NetMod Syna** on Windows!
+A high-performance, native Linux system-wide VPN & proxy bypass tool built with **Go (Golang)**. It converts any `vless://` link (with TLS, SNI spoofing, and Chrome uTLS fingerprints) into a full-OS virtual network adapter (`tun0`) on Linux — routing **Web Browsers, Terminal/Bash/Curl, Docker, and all background services**, with a rich **Terminal User Interface (TUI) Dashboard**, functioning like **NetMod Syna** on Linux!
 
 ---
 
 ## 🎯 Features
 
-- **🌐 100% System-Wide TUN Routing:** Uses Linux Kernel `/dev/net/tun` with Google gVisor TCP/IP stack to route all L3 IP packets.
-- **🛡️ DPI Bypass & SNI Spoofing:** Seamlessly handles SNI spoofing (`aka.ms`, `zoom.us`, etc.) and TLS Client Hello fingerprints (`fp=chrome`).
-- **🔒 DNS Poisoning Protection:** Routes DNS over TLS (`tls://1.1.1.1`) directly through the VLESS tunnel, bypassing ISP DNS hijack (Port 53).
-- **⚡ Anti-Loop Protection:** Automatically detects the default network gateway and adds bypass routes for the proxy server host, preventing connection freezes.
-- **📦 Single Standalone Binary:** Zero external runtime dependencies (no Python, no Node.js required).
-- **🔄 Auto Core Provisioning:** Automatically downloads and configures the verified Sing-box 1.8+ Linux engine if not found.
-- **⚙️ systemd Service Ready:** Run as a background daemon that connects automatically when Linux boots up.
+- **🌐 100% System-Wide TUN Routing:** Uses Linux Kernel `/dev/net/tun` with Google gVisor stack to route all L3 IP packets.
+- **🖥️ Interactive Live TUI Dashboard:** Real-time speed gauges, ping monitor, node selector, and event logs inside terminal.
+- **🔄 Detached Background Daemon:** Closing the terminal does **NOT** drop the VPN. Reopen terminal anytime to reattach!
+- **📋 Multi-Profile Manager:** Save multiple VLESS nodes, switch between them, and delete unwanted profiles.
+- **🤫 Zero Log Flooding:** Verbose engine logs are captured in a memory ring buffer and displayed cleanly in the mini-log box.
+- **📊 Real-Time Bandwidth Monitor:** Measures live download/upload speeds (MB/s & KB/s) directly from `/sys/class/net/tun0`.
+- **🛡️ DPI Bypass & SNI Spoofing:** Seamlessly handles SNI spoofing (`aka.ms`, etc.) and TLS fingerprints (`fp=chrome`).
+- **📦 Self-Contained System Tool:** Installs globally into `/usr/local/bin/` and `/etc/vless-linux/` — setup folder can be deleted!
 
 ---
 
-## 📂 Project Structure
+## 🚀 Installation & Quick Start
 
-```
-Vless/
-├── cmd/
-│   └── vless-linux/
-│       └── main.go              # Main CLI entrypoint
-├── internal/
-│   ├── parser/
-│   │   └── vless.go             # VLESS URI decoder & validator
-│   ├── config/
-│   │   └── generator.go         # TUN + Sing-box JSON generator
-│   ├── engine/
-│   │   └── manager.go           # Process lifecycle & signal handler
-│   ├── routing/
-│   │   └── linux.go             # Linux TUN & latency checks
-│   └── ui/
-│       └── terminal.go          # ANSI color terminal UI
-├── scripts/
-│   ├── install.sh               # 1-Click Linux installer
-│   └── vless-linux.service      # systemd unit file
-├── vless-linux                  # Precompiled Linux (amd64) binary
-├── vless-windows.exe            # Windows testing binary
-├── go.mod
-└── README.md
-```
+### 1-Click System Installation (Recommended)
 
----
-
-## 🚀 Quick Start (Linux මත පාවිච්චි කරන ආකාරය)
-
-### ක්‍රමය 1: සකස් කර ඇති Linux Binary එක කෙලින්ම Run කිරීම (Fastest)
-
-1. මෙම ෆෝල්ඩරයේ ඇති **`vless-linux`** binary එක ඔබේ Linux පරිගණකයට Copy කරගන්න.
-2. Terminal එක විවෘත කර Binary එකට execute permissions ලබා දෙන්න:
+1. Clone or download the repository on your Linux machine:
    ```bash
-   chmod +x vless-linux
+   git clone https://github.com/Sathira-Laksahan/vless-linux.git
+   cd vless-linux
    ```
-3. පහත විධානය මගින් ඔබගේ VLESS link එක සමඟ Connect වන්න:
+2. Run the installer as root:
    ```bash
-   sudo ./vless-linux connect "vless://<your-uuid>@<your-server>:443?encryption=none&fp=chrome&security=tls&sni=<your-sni>&type=tcp#Node-Name"
+   sudo ./scripts/install.sh
    ```
-4. **සම්බන්ධතාවය අවසන් කිරීමට (Disconnect):** Terminal එකේ `Ctrl + C` ඔබන්න. Tool එක මගින් ස්වයංක්‍රීයව Routing Tables සහ DNS නැවත සාමාන්‍ය තත්වයට පත් කරයි.
-
-> **💡 Note:** එක් වරක් Link එක ලබා දුන් පසු එය සුරැකෙන බැවින්, ඊළඟ වතාවේදී සරලව `sudo ./vless-linux connect` run කළ හැක!
+3. **Setup folder එක delete කළ හැක:** Installation එක අවසන් වූ පසු, source folder එක සම්පූර්ණයෙන්ම `rm -rf` කර delete කළ හැක. Tool එක Linux system එකේ `/usr/local/bin/` හි ස්ථිරවම ස්ථාපිත වේ.
 
 ---
 
-### ක්‍රමය 2: සම්පූර්ණ System Service එකක් ලෙස Install කිරීම (1-Click Installer)
+## 💻 Usage & Commands
 
-`scripts/install.sh` මගින් `/usr/local/bin/vless-linux` ලෙස install කර systemd service එකක් සාදාගත හැක:
+### 1. Interactive TUI Dashboard (Default)
+Terminal එකේ සරලවම පහත විධානය run කරන්න:
+```bash
+sudo vless-linux
+```
+* Status indicator (Connected / Disconnected)
+* Real-time Download / Upload speeds
+* Node name, Server IP, Latency (ping)
+* Saved profiles list
+* Recent system logs
+* **Hotkeys:**
+  * `[c]` -> Connect / Disconnect VPN
+  * `[p]` -> Switch active profile
+  * `[a]` -> Add new VLESS profile
+  * `[d]` -> Delete a profile
+  * `[q]` -> Close dashboard (**VPN එක background එකේ දිගටම run වේ!**)
+  * `[x]` -> Disconnect and Exit
+
+---
+
+### 2. Background Connection (Terminal Close Protection)
 
 ```bash
-chmod +x scripts/install.sh
-sudo ./scripts/install.sh
+# Saved active profile එකට background එකේ connect වීම
+sudo vless-linux connect
+
+# අලුත් VLESS link එකක් ලබා දී connect වීම (Single quotes භාවිතා කරන්න)
+sudo vless-linux connect 'vless://uuid@server:443?encryption=none&fp=chrome&security=tls&sni=aka.ms&type=tcp#NodeName'
+
+# Connection එක නවතා routes restore කිරීම
+sudo vless-linux disconnect
+```
+> **💡 සටහන:** `sudo vless-linux connect` කළ පසු Terminal එක close කළද connection එක කිසිසේත් විසන්ධි නොවේ!
+
+---
+
+### 3. Profile Management Commands
+
+```bash
+# Profiles ලැයිස්තුව බැලීම
+vless-linux profile list
+
+# අලුත් VLESS profile එකක් add කිරීම
+vless-linux profile add '<vless_url>' "Dialog-Bypass"
+
+# Active profile එක මාරු කිරීම (Number හෝ Name මගින්)
+vless-linux profile use 1
+
+# Profile එකක් delete කිරීම
+vless-linux profile delete 2
 ```
 
-**Auto-connect on Linux boot (පරිගණකය On වන විටම auto connect වීමට):**
+---
+
+### 4. Status & Logs
+
+```bash
+# තත්ත්වය සහ Bandwidth පරීක්ෂා කිරීම (root අවශ්‍ය නොවේ)
+vless-linux status
+
+# පසුගිය logs බැලීම
+vless-linux logs
+```
+
+---
+
+### 5. Auto-Connect on Linux Boot (systemd)
+
+පරිගණකය On වන විටම Background එකේ auto-connect වීමට:
 ```bash
 sudo systemctl enable --now vless-linux
 ```
-
-**Service Status පරීක්ෂා කිරීමට:**
+Service status බැලීමට:
 ```bash
 sudo systemctl status vless-linux
-```
-
----
-
-## 🛠️ CLI Commands & Usage
-
-| Command | විස්තරය |
-| :--- | :--- |
-| `sudo ./vless-linux connect [link]` | මුළු OS එකම TUN mode හරහා VLESS වෙත සම්බන්ධ කරයි |
-| `./vless-linux parse <link>` | VLESS link එකේ තොරතුරු (UUID, Host, SNI, fp) පරීක්ෂා කරයි |
-| `./vless-linux test <link>` | Server එකේ latency සහ connection එක test කරයි |
-| `./vless-linux export <link> [file.json]` | Sing-box JSON configuration එක export කරගැනීමට |
-| `./vless-linux version` | Tool එකේ version එක පෙන්වයි |
-
----
-
-## 🔨 Building from Source (කේතය නැවත Compile කිරීමට)
-
-### Linux මත Build කිරීම:
-```bash
-go build -ldflags="-s -w" -o vless-linux ./cmd/vless-linux
-```
-
-### Windows මත සිට Linux සඳහා Cross-compile කිරීම:
-```powershell
-$env:GOOS="linux"; $env:GOARCH="amd64"; go build -ldflags="-s -w" -o vless-linux ./cmd/vless-linux
 ```
