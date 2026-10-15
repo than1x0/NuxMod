@@ -174,12 +174,12 @@ func (d *Daemon) Run(ctx context.Context, prof *profile.Profile) error {
 	defer listener.Close()
 	defer os.Remove(sockPath)
 
-	// Clean up any stale sing-box and disable IPv6
+	// Clean up any stale sing-box and setup IPv6 deadlock mitigation without breaking OpenVPN/WireGuard
 	if runtime.GOOS == "linux" {
 		_ = exec.Command("killall", "-9", "sing-box").Run()
-		setIPv6Disabled(true)
+		setupIPv6Mitigation()
 	}
-	defer setIPv6Disabled(false)
+	defer restoreIPv6Mitigation()
 
 	// Parse VLESS link
 	vlessCfg, err := parser.ParseVlessLink(prof.URL)
@@ -392,15 +392,27 @@ func readUintFromFile(path string) uint64 {
 	return val
 }
 
-func setIPv6Disabled(disabled bool) {
+// setupIPv6Mitigation ensures system-wide applications seamlessly use IPv4 over NuxMod TUN bypass
+// without causing deadlocks on restricted networks, while keeping IPv6 enabled in kernel so secondary
+// VPN adapters (OpenVPN tun1 for Hack The Box, WireGuard wg0) can receive pushed configs without fatal errors.
+func setupIPv6Mitigation() {
 	if runtime.GOOS != "linux" {
 		return
 	}
-	val := "0"
-	if disabled {
-		val = "1"
+	// 1. Ensure kernel doesn't reject IPv6 assignment on secondary interfaces (tun1, wg0)
+	_ = os.WriteFile("/proc/sys/net/ipv6/conf/all/disable_ipv6", []byte("0"), 0644)
+	_ = os.WriteFile("/proc/sys/net/ipv6/conf/default/disable_ipv6", []byte("0"), 0644)
+	_ = exec.Command("sysctl", "-w", "net.ipv6.conf.all.disable_ipv6=0", "net.ipv6.conf.default.disable_ipv6=0").Run()
+
+	// 2. Blackhole external IPv6 routing with metric 1 so browsers/curl/apt immediately fall back
+	// to IPv4 over NuxMod without waiting for long IPv6 connection timeouts.
+	_ = exec.Command("ip", "-6", "route", "replace", "unreachable", "default", "metric", "1").Run()
+}
+
+// restoreIPv6Mitigation cleanly removes the blackhole route upon disconnection.
+func restoreIPv6Mitigation() {
+	if runtime.GOOS != "linux" {
+		return
 	}
-	_ = os.WriteFile("/proc/sys/net/ipv6/conf/all/disable_ipv6", []byte(val), 0644)
-	_ = os.WriteFile("/proc/sys/net/ipv6/conf/default/disable_ipv6", []byte(val), 0644)
-	_ = exec.Command("sysctl", "-w", fmt.Sprintf("net.ipv6.conf.all.disable_ipv6=%s", val)).Run()
+	_ = exec.Command("ip", "-6", "route", "del", "unreachable", "default", "metric", "1").Run()
 }

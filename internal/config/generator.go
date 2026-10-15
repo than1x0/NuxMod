@@ -194,8 +194,7 @@ func GenerateSingBoxConfig(vless *parser.VlessConfig) (*SingBoxConfig, error) {
 					Outbound: "dns-out",
 				},
 				{
-					Port:     []uint16{443},
-					Network:  "udp",
+					Protocol: "quic",
 					Outbound: "block",
 				},
 				{

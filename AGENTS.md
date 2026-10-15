@@ -87,9 +87,9 @@
 ## 4. Critical Rules & Known Gotchas
 
 > [!CAUTION]
-> **1. IPv6 Deadlock Prevention:**  
-> On Linux bridged networking (VMware, VirtualBox, or native LAN), sing-box auto-route will attempt to capture IPv6 traffic. If the upstream ISP lacks native IPv6, the system network will deadlock.  
-> **Always disable IPv6** when TUN is active via `/proc/sys/net/ipv6/conf/all/disable_ipv6 = 1`, and restore on disconnect.
+> **1. IPv6 Deadlock & Multi-VPN Coexistence:**  
+> On Linux bridged networking (VMware, VirtualBox, or native LAN), upstream ISPs often lack native IPv6 or drop external IPv6 traffic. However, disabling IPv6 globally via `all/disable_ipv6 = 1` crashes secondary VPN clients (such as OpenVPN for Hack The Box / TryHackMe or WireGuard) when they receive pushed IPv6 configs.  
+> **Always mitigate IPv6 via blackhole routing** (`ip -6 route replace unreachable default metric 1`) while keeping kernel IPv6 enabled (`disable_ipv6 = 0`). This guarantees instant IPv4 fallback for public web traffic without breaking secondary TUN/TAP interfaces.
 
 > [!IMPORTANT]
 > **2. Context Propagation:**  
